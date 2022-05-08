@@ -1,1 +1,1 @@
-from .codecs import QoiEncoder, QoiDecoder
+from .codecs import QoiDecoder, QoiEncoder
