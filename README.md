@@ -1,7 +1,7 @@
 # joe-qoi
 
-<!-- todo![![pypi](https://img.shields.io/pypi/v/joe-qoi.svg)](https://pypi.org/project/joe-qoi/) -->
-<!-- [![Changelog](https://img.shields.io/github/v/release/jkerhin/joe-qoi?include_prereleases&label=changelog)](https://github.com/jkerhin/joe-qoi/releases) -->
+<!-- TODO [![pypi](https://img.shields.io/pypi/v/joe-qoi.svg)](https://pypi.org/project/joe-qoi/) -->
+<!-- TODO [![Changelog](https://img.shields.io/github/v/release/jkerhin/joe-qoi?include_prereleases&label=changelog)](https://github.com/jkerhin/joe-qoi/releases) -->
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jkerhin/joe-qoi/blob/main/LICENSE)
 
 Pure Python implementation of QOI image format
@@ -25,6 +25,11 @@ referencing the Python QOI package, and then later take a look and see how our a
 differ.
 
 ## Usage
+
+The QOI format is _heavily_ optimized for low-level bitwise operations. Python, on the
+other hand, is _not_ optimized for these kind of operations. As a result, this library
+is _vastly_ less perforamant than the `c` reference code. E.g. decoding `dice.qoi` takes
+45.3 **seconds** on my machine. 
 
 TODO: Usage instructions go here.
 

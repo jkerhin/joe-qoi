@@ -1,7 +1,7 @@
 """Encoding and Decoding operations for QOI format"""
-from copy import copy
 import logging
 import struct
+from copy import copy
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -60,12 +60,15 @@ class QoiDecoder:
         self._pixels: List[RgbaPixel] = []
         self._decode()
         if len(self._pixels) != self._num_pixels:
-            raise IOError(f"Improper decode! Expected {self._num_pixels} got {len(self._pixels)}")
+            raise IOError(
+                f"Improper decode! Expected {self._num_pixels} got {len(self._pixels)}"
+            )
 
         # TODO: Reformat as RGB(A) array
 
     def _decode(self):
-
+        """Decode the qoi_data stream"""
+        pixel_pos = 0
         px = RgbaPixel(r=0, g=0, b=0, a=255)
         while self._ix < (self._qoi_data_len - 8):
             this_byte = self.qoi_data[self._ix]
@@ -73,7 +76,7 @@ class QoiDecoder:
             # First, check for the two 8-bit headers
             if this_byte == QOI_OP_RGB:
                 # Full RGB pixel values
-                log.debug(f"Raw RGB at {self._ix}")
+                log.debug(f"Raw RGB at {self._ix} - {pixel_pos}")
                 r, g, b = self.qoi_data[self._ix : self._ix + 3]
                 px.r = r
                 px.g = g
@@ -82,7 +85,7 @@ class QoiDecoder:
 
             elif this_byte == QOI_OP_RGBA:
                 # Full RGBA pixel values
-                log.debug(f"Raw RGBA at {self._ix}")
+                log.debug(f"Raw RGBA at {self._ix} - {pixel_pos}")
                 r, g, b, a = self.qoi_data[self._ix : self._ix + 4]
                 px.r = r
                 px.g = g
@@ -93,7 +96,7 @@ class QoiDecoder:
             # Now on to the four two-bit tags
             elif (this_byte & QOI_MASK_2) == QOI_OP_INDEX:
                 # Simple lookup
-                log.debug(f"Index op at {self._ix}")
+                log.debug(f"Index op at {self._ix} - {pixel_pos}")
                 index = this_byte
                 px = self._lookup[index]
                 log.debug(f"Index - {index} - {px}")
@@ -101,14 +104,14 @@ class QoiDecoder:
             elif (this_byte & QOI_MASK_2) == QOI_OP_DIFF:
                 # Each of this pixel's R, G, B values differs from the previous pixels'
                 # by no more than [-2, 1]. Offsets are biased 2 (e.g. -2 = b00, 1 = b11)
-                log.debug(f"OP_DIFF at {self._ix}")
+                log.debug(f"OP_DIFF at {self._ix} - {pixel_pos}")
                 px.r += ((this_byte >> 4) & int("03", 16)) - 2
                 px.g += int((this_byte >> 2) & int("03", 16)) - 2
                 px.b += int(this_byte & int("03", 16)) - 2
 
             elif (this_byte & QOI_MASK_2) == QOI_OP_LUMA:
                 # A more complex, two-byte transformation; see _qoi_op_luma()
-                log.debug(f"OP_LUMA at {self._ix}")
+                log.debug(f"OP_LUMA at {self._ix} - {pixel_pos}")
                 next_byte = self.qoi_data[self._ix]
                 self._ix += 1
                 d_r, d_g, d_b = self._qoi_op_luma(this_byte, next_byte)
@@ -120,11 +123,12 @@ class QoiDecoder:
                 # A run of repeating pixels. Note a bias of 1 to allow runs of 1..62
                 # pixels. Run lengths of 63 and 64 px are illegal as they are occupied
                 # by the QOI_OP_RGB and QOI_OP_RGBA tags.
-                log.debug(f"OP_RUN at {self._ix}")
+                log.debug(f"OP_RUN at {self._ix} - {pixel_pos}")
                 run_len = int(this_byte & ~QOI_MASK_2)
                 run_len += 1
-                log.debug(f"Run of {run_len}, starting at {len(self._pixels)}")
+                log.debug(f"Run of {run_len}")
                 self._pixels.extend((copy(px) for _ in range(run_len)))
+                pixel_pos = len(self._pixels)
                 continue
 
             # TODO: If/when implementing streaming, need to check for closing bytes run
@@ -136,13 +140,13 @@ class QoiDecoder:
             px.a &= int("FF", 16)
 
             hash_index = qoi_color_hash(px.r, px.g, px.b, px.a)
-            self._lookup[hash_index] = px
+            self._lookup[hash_index] = copy(px)
             self._pixels.append(copy(px))
+            pixel_pos = len(self._pixels)
 
             if len(self._pixels) > self._num_pixels:
                 log.error(f"More pixels than expected! Bailing out at {self._ix}")
                 return
-
 
         # "The byte stream's end is marked with 7 0x00 bytes followed by a single 0x01
         # byte"
@@ -168,9 +172,9 @@ class QoiDecoder:
         log.debug(f"Header: {width}x{height}, alpha: {has_alpha}, linear: {all_linear}")
         return width, height, has_alpha, all_linear
 
-    def write_ppm(self, out_file : str):
+    def write_ppm(self, out_file: str):
         """Serialize pixel array to Netpbm format file
-        
+
         The Netpbm format is trivial to serialize, and allows for visual inspection of
         the decoded stream.
 
@@ -190,8 +194,6 @@ class QoiDecoder:
             for px in self._pixels:
                 hdl.write(px.packed_rgb)
         logging.info(f"Wrote PPM to {out_file}")
-            
-            
 
     @staticmethod
     def _qoi_op_luma(first_byte, second_byte) -> Tuple[int, int, int]:
