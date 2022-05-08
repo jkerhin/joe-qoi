@@ -2,7 +2,7 @@
 
 <!-- todo![![pypi](https://img.shields.io/pypi/v/joe-qoi.svg)](https://pypi.org/project/joe-qoi/) -->
 <!-- [![Changelog](https://img.shields.io/github/v/release/jkerhin/joe-qoi?include_prereleases&label=changelog)](https://github.com/jkerhin/joe-qoi/releases) -->
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/jkerhin/joe-qoi/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jkerhin/joe-qoi/blob/main/LICENSE)
 
 Pure Python implementation of QOI image format
 

@@ -80,3 +80,7 @@ cython_debug/
 # Misc dev data
 data/
 
+# IDE workspaces
+.vscode/
+.idea/
+
