@@ -3,7 +3,7 @@ import logging
 import struct
 from copy import copy
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Iterable, List, Tuple, Union
 
 log = logging.getLogger(__name__)
 # fmt: off
@@ -39,8 +39,105 @@ def qoi_color_hash(r: int, g: int, b: int, a: int) -> int:
 
 
 class QoiEncoder:
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        rgba_pixels: List[RgbaPixel],
+        width: int,
+        height: int,
+        has_alpha: bool,
+        all_linear: bool,
+    ):
+        self.rgba_pixels = rgba_pixels
+        self.width = width
+        self.height = height
+        self.has_alpha = has_alpha
+        self.all_linear = all_linear
+
+    def __repr__(self):
+        resolution = f"{self.width}x{self.height}"
+        channel_str = "RGBA" if self.has_alpha else "RGB"
+        colorspace_str = (
+            "all channels linear" if self.all_linear else "sRGB with linear alpha"
+        )
+        n_bytes = len(self.rgba_pixels) * (4 if self.has_alpha else 3)
+        return f"{resolution} {channel_str}, {colorspace_str}, {n_bytes} bytes to pack"
+
+    @staticmethod
+    def encode_header(
+        width: int, height: int, has_alpha: bool, all_linear: bool
+    ) -> bytes:
+        """From the spec document:
+
+        A QOI file has a 14 byte header, followed by any number of data "chunks" and an
+        8-byte end marker.
+        struct qoi_header_t {
+            char     magic[4];   // magic bytes "qoif"
+            uint32_t width;      // image width in pixels (BE)
+            uint32_t height;     // image height in pixels (BE)
+            uint8_t  channels;   // 3 = RGB, 4 = RGBA
+            uint8_t  colorspace; // 0 = sRGB with linear alpha, 1 = all channels linear
+        };
+
+        """
+        header = bytearray(14)
+        header[:4] = "qoif".encode("ASCII")  # "magic" bytes
+
+        struct.pack_into(">II", header, 4, width, height)
+
+        channels = 4 if has_alpha else 3
+        colorspace = 1 if all_linear else 0
+        struct.pack_into(">BB", header, 12, channels, colorspace)
+
+        return bytes(header)
+
+    @classmethod
+    def from_bytes(
+        cls,
+        bytes_in: Union[bytearray, Iterable[bytes]],
+        width: int,
+        height: int,
+        has_alpha: bool,
+        all_linear: bool,
+    ):
+        """Create a QoiEncoder from raw bytes and metadata"""
+        bytes_per_pix = 4 if has_alpha else 3
+        rgba_pixels: List[RgbaPixel] = []
+        for offset in range(0, len(bytes_in), bytes_per_pix):
+            px = RgbaPixel(*bytes_in[offset : offset + bytes_per_pix])
+            if not has_alpha:
+                px.a = 255
+            rgba_pixels.append(px)
+        return cls(rgba_pixels, width, height, has_alpha, all_linear)
+
+    @classmethod
+    def from_ppm(cls, file_name: str):
+        """Create a QoiEncoder from a Netpbm file
+
+        For simplicity's sake, this only suports handling binary RGB (P6) files. I'm
+        sure it wouldn't be a huge lift to code up greyscale/BW decoder, but this is a
+        QOI library not a Netpbm library.
+
+        Read the file size from the PPM header, then pass the data to from_bytes(). PPM
+        does not support alpha channel, so has_alpha=False
+
+        """
+        with open(file_name, "rb") as hdl:
+            ppm = hdl.read()
+
+        ppm_type, w_h, max_val, data = ppm.split(b"\n")
+        ppm_type = ppm_type.decode("ASCII")
+        max_val = max_val.decode("ASCII")
+
+        if (ppm_type != "P6") or (max_val != "255"):
+            raise IOError(
+                f"Unsupported Netpbf file. Expected P6, 255 got {ppm_type}, {max_val}"
+            )
+
+        width, height = map(int, w_h.decode("ASCII").split())
+
+        return cls.from_bytes(
+            bytes_in=data, width=width, height=height, has_alpha=False, all_linear=True
+        )
 
 
 class QoiDecoder:
