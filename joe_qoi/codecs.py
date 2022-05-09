@@ -5,8 +5,6 @@ from copy import copy
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from attr import attr
-
 log = logging.getLogger(__name__)
 # fmt: off
 QOI_OP_INDEX = int("00", 16)  # b00xxxxxxxx

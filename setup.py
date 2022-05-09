@@ -1,22 +1,14 @@
-import os
+from pathlib import Path
 
 from setuptools import setup
 
-VERSION = "0.1"
-
-
-def get_long_description():
-    with open(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "README.md"),
-        encoding="utf8",
-    ) as fp:
-        return fp.read()
+VERSION = "0.0.1"
 
 
 setup(
     name="joe-qoi",
     description="Pure Python implementation of QOI image format",
-    long_description=get_long_description(),
+    long_description=Path("README.md").read_text(),
     long_description_content_type="text/markdown",
     author="Joe Kerhin",
     url="https://github.com/jkerhin/joe-qoi",

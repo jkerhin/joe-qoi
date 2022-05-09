@@ -1,5 +1,3 @@
-from tkinter import W
-
 from pytest import raises
 
 from joe_qoi import QoiDecoder
@@ -10,8 +8,8 @@ def test_decode_header_good():
     width, height, has_alpha, all_linear = QoiDecoder.decode_header(test_bytes)
     assert width == 800
     assert height == 600
-    assert has_alpha == True
-    assert all_linear == False
+    assert has_alpha is True
+    assert all_linear is False
 
 
 def test_decode_header_bad():

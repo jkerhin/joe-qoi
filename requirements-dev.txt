@@ -1,4 +1,6 @@
 pytest
-black
-flake8
-isort
+pre-commit
+# These will be installed via pre-commit
+# black==22.3.0
+# flake8==4.0.1
+# isort==5.10.1

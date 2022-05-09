@@ -38,13 +38,19 @@ TODO: Usage instructions go here.
 To contribute to this library, first checkout the code. Then create a new virtual environment:
 
     cd joe-qoi
-    python -m venv venv
-    source venv/bin/activate
+    python -m venv .venv
+    source .venv/bin/activate
 
-Now install the dependencies and test dependencies:
+Now install the dev dependencies and test dependencies:
 
-    pip install -e '.[test]'
+    pip install -r requirements-dev.txt
+
+Next, configure `pre-commit`. Note that this will likely take a minute or so to
+get set up the first time, unless you're using `pre-commit` in other projects.
+
+    pre-commit install
+    pre-commit run -a
 
 To run the tests:
 
-    pytest
+    pytest test

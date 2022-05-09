@@ -18,7 +18,13 @@ jobs:
         cache-dependency-path: '**/setup.py'
     - name: Install dependencies
       run: |
-        pip install -e '.[test]'
+        pip install -r requirements-ci.txt
+        pip install -e .
+    - name: Style checks
+      run: |
+        isort .
+        black .
+        flake8 .
     - name: Run tests
       run: |
         pytest
