@@ -79,6 +79,7 @@ cython_debug/
 
 # Misc dev data
 data/
+qoi_test_images/
 
 # IDE workspaces
 .vscode/

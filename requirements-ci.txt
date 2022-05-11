@@ -1,4 +1,5 @@
 pytest
+pillow
 # Don't need pre-commit in CI
 # pre-commit
 # Install directly to venv in CI

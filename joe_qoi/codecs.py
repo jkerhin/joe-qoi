@@ -152,11 +152,11 @@ class QoiDecoder:
         # This is called 'index' in the reference code, but that would easy to confuse
         # with the '_ix' variable that tracks position
         self._lookup = [RgbaPixel() for _ in range(64)]
-        self._pixels: List[RgbaPixel] = []
+        self.pixels: List[RgbaPixel] = []
         self._decode()
-        if len(self._pixels) != self._num_pixels:
+        if len(self.pixels) != self._num_pixels:
             raise IOError(
-                f"Improper decode! Expected {self._num_pixels} got {len(self._pixels)}"
+                f"Improper decode! Expected {self._num_pixels} got {len(self.pixels)}"
             )
 
         # TODO: Reformat as RGB(A) array
@@ -222,8 +222,8 @@ class QoiDecoder:
                 run_len = int(this_byte & ~QOI_MASK_2)
                 run_len += 1
                 log.debug(f"Run of {run_len}")
-                self._pixels.extend((copy(px) for _ in range(run_len)))
-                pixel_pos = len(self._pixels)
+                self.pixels.extend((copy(px) for _ in range(run_len)))
+                pixel_pos = len(self.pixels)
                 continue
 
             # TODO: If/when implementing streaming, need to check for closing bytes run
@@ -236,10 +236,10 @@ class QoiDecoder:
 
             hash_index = qoi_color_hash(px.r, px.g, px.b, px.a)
             self._lookup[hash_index] = copy(px)
-            self._pixels.append(copy(px))
-            pixel_pos = len(self._pixels)
+            self.pixels.append(copy(px))
+            pixel_pos = len(self.pixels)
 
-            if len(self._pixels) > self._num_pixels:
+            if len(self.pixels) > self._num_pixels:
                 log.error(f"More pixels than expected! Bailing out at {self._ix}")
                 return
 
@@ -286,7 +286,7 @@ class QoiDecoder:
         with open(out_file, "wb") as hdl:
             for line in ppm_header:
                 hdl.write(f"{line}\n".encode("ASCII"))
-            for px in self._pixels:
+            for px in self.pixels:
                 hdl.write(px.packed_rgb)
         logging.info(f"Wrote PPM to {out_file}")
 

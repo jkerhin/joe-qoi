@@ -25,6 +25,10 @@ jobs:
         isort .
         black .
         flake8 .
+    - name: Download and extract test data
+      run: |
+        wget 'https://f000.backblazeb2.com/file/KerhinPublicBucket/qoi_test_images.zip'
+        unzip qoi_test_images.zip
     - name: Run tests
       run: |
         pytest
