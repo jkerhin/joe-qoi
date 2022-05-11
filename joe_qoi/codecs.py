@@ -53,6 +53,16 @@ class QoiEncoder:
         self.has_alpha = has_alpha
         self.all_linear = all_linear
 
+        # This is called 'index' in the reference code, but that would easy to confuse
+        # with the '_ix' variable that tracks position
+        self._lookup = [RgbaPixel() for _ in range(64)]
+        self.packed_bytes: bytearray = bytearray()
+
+        self._encode()
+
+    def _encode(self):
+        raise NotImplementedError
+
     def __repr__(self):
         resolution = f"{self.width}x{self.height}"
         channel_str = "RGBA" if self.has_alpha else "RGB"
@@ -61,6 +71,102 @@ class QoiEncoder:
         )
         n_bytes = len(self.rgba_pixels) * (4 if self.has_alpha else 3)
         return f"{resolution} {channel_str}, {colorspace_str}, {n_bytes} bytes to pack"
+
+    @staticmethod
+    def pack_rgb(px: RgbaPixel) -> bytes:
+        """Pack RGB pixel with QOI_OP_RGB tag and r, g, b pixel values"""
+        return bytes((QOI_OP_RGB, px.r, px.g, px.b))
+
+    @staticmethod
+    def pack_rgba(px: RgbaPixel) -> bytes:
+        """Pack RGBA pixel with QOI_OP_RGB tag and r, g, b, a pixel values"""
+        return bytes((QOI_OP_RGBA, px.r, px.g, px.b, px.a))
+
+    @staticmethod
+    def pack_index(index: int) -> bytes:
+        """Index into the "recently seen pixels" lookup table
+
+        .- QOI_OP_INDEX ----------.
+        |         Byte[0]         |
+        |  7  6  5  4  3  2  1  0 |
+        |-------+-----------------|
+        |  0  0 |     index       |
+        `-------------------------`
+        2-bit tag b00
+        6-bit index into the color index array: 0..63
+
+        A valid encoder must not issue 2 or more consecutive QOI_OP_INDEX chunks to the
+        same index. QOI_OP_RUN should be used instead.
+
+        """
+        if not 0 < index < 63:
+            raise ValueError("QOI_OP_INDEX allowed range is [0, 63]")
+        return bytes([index])
+
+    @staticmethod
+    def pack_diff(prev_px: RgbaPixel, this_px: RgbaPixel) -> bytes:
+        """Store RGB deltas between two very closely spaced pixels, and QOI_OP_DIFF tag
+
+        .- QOI_OP_DIFF -----------.
+        |         Byte[0]         |
+        |  7  6  5  4  3  2  1  0 |
+        |-------+-----+-----+-----|
+        |  0  1 |  dr |  dg |  db |
+        `-------------------------`
+        2-bit tag b01
+        2-bit   red channel difference from the previous pixel between -2..1
+        2-bit green channel difference from the previous pixel between -2..1
+        2-bit  blue channel difference from the previous pixel between -2..1
+
+        The difference to the current channel values are using a wraparound operation,
+        so "1 - 2" will result in 255, while "255 + 1" will result in 0.
+
+        Values are stored as unsigned integers with a bias of 2. E.g. -2 is stored as
+        0 (b00). 1 is stored as 3 (b11).
+
+        The alpha value remains unchanged from the previous pixel.
+
+        """
+        dr = this_px.r - prev_px.r
+        dg = this_px.g - prev_px.g
+        db = this_px.b - prev_px.b
+
+        # # Enforce one-byte wraparound
+        # dr &= 255
+        # dg &= 255
+        # db &= 255
+
+        if not all(-2 <= d <= 1 for d in (dr, dg, db)):
+            raise ValueError("QOI_OP_DIFF all deltas must be in range [-2, 1]")
+
+        out_byte_as_int = 0  # 0x00
+        out_byte_as_int |= QOI_OP_DIFF
+        out_byte_as_int |= (dr + 2) << 4
+        out_byte_as_int |= (dg + 2) << 2
+        out_byte_as_int |= db + 2
+
+        return bytes([out_byte_as_int])
+
+    @staticmethod
+    def pack_luma(prev_px: RgbaPixel, this_px: RgbaPixel) -> bytes:
+        """Store RGB deltas between two closely spaced pixels, and QOI_OP_LUMA tag
+
+        Allows for a wider
+        """
+        dr = this_px.r - prev_px.r
+        dg = this_px.g - prev_px.g
+        db = this_px.b - prev_px.b
+
+        if not all(-2 <= d <= 1 for d in (dr, dg, db)):
+            raise ValueError("QOI_OP_DIFF all deltas must be in range [-2, 1]")
+
+        out_byte_as_int = 0  # 0x00
+        out_byte_as_int |= QOI_OP_DIFF
+        out_byte_as_int |= (dr + 2) << 4
+        out_byte_as_int |= (dg + 2) << 2
+        out_byte_as_int |= db + 2
+
+        return bytes([out_byte_as_int])
 
     @staticmethod
     def encode_header(
