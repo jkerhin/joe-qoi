@@ -38,6 +38,16 @@ def qoi_color_hash(r: int, g: int, b: int, a: int) -> int:
     return (r * 3 + g * 5 + b * 7 + a * 11) % 64
 
 
+# TODO: Find a better place for this...
+def wrap_around(val: int) -> int:
+    """Implement 'signed character' wraparound logic"""
+    if val > 127:
+        return val - 256
+    elif val < -128:
+        return val + 256
+    return val
+
+
 class QoiEncoder:
     def __init__(
         self,
@@ -127,14 +137,9 @@ class QoiEncoder:
         The alpha value remains unchanged from the previous pixel.
 
         """
-        dr = this_px.r - prev_px.r
-        dg = this_px.g - prev_px.g
-        db = this_px.b - prev_px.b
-
-        # # Enforce one-byte wraparound
-        # dr &= 255
-        # dg &= 255
-        # db &= 255
+        dr = wrap_around(this_px.r - prev_px.r)
+        dg = wrap_around(this_px.g - prev_px.g)
+        db = wrap_around(this_px.b - prev_px.b)
 
         if not all(-2 <= d <= 1 for d in (dr, dg, db)):
             raise ValueError("QOI_OP_DIFF all deltas must be in range [-2, 1]")

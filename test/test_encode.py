@@ -48,7 +48,7 @@ def test_pack_diff_wraparound():
     prev_px = RgbaPixel(255, 2, 255)
     this_px = RgbaPixel(253, 1, 0)
     packed_diff = QoiEncoder.pack_diff(prev_px, this_px)
-    expected_byte = b"\x4b"  # b0100 1011
+    expected_byte = b"\x47"  # b0100 0111
     assert expected_byte == packed_diff
 
 
