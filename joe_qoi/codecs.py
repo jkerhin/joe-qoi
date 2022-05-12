@@ -68,10 +68,88 @@ class QoiEncoder:
         self._lookup = [RgbaPixel() for _ in range(64)]
         self.packed_bytes: bytearray = bytearray()
 
+        # First, pack the header
+        self.packed_bytes += self.encode_header(width, height, has_alpha, all_linear)
+
+        # Then iterate through the pixels, packing into '.packed_bytes' as we go
         self._encode()
 
+        # Finally, write the stream close bytes
+        self._close_stream()
+
     def _encode(self):
-        raise NotImplementedError
+        """Pack pixels into QOI format
+
+        Operates in a streaming manner with limited history. Prefers low-byte storage
+        mechanisms (QOI_OP_RUN, QOI_OP_INDEX) over multi-byte storage. Exit early when
+        operation is identified to avoid doing unnecessary math
+
+        """
+
+        # Encoder/decoder initial condition, as per speficication
+        prev_px = RgbaPixel(r=0, g=0, b=0, a=255)
+
+        run_len = 0
+        n_pixels = len(self.rgba_pixels)
+        for ix_px, px in enumerate(self.rgba_pixels):
+
+            # Handle runs of identical pixels
+            if px == prev_px:
+                # Run continues
+                run_len += 1
+                if run_len == 62 or ix_px == n_pixels:
+                    # Max run length
+                    self.packed_bytes += self.pack_run(run_len)
+                    run_len = 0
+                continue
+            if run_len:
+                # Previously was in a run, have concluded
+                self.packed_bytes += self.pack_run(run_len)
+                run_len = 0
+
+            hash_index = qoi_color_hash(px.r, px.g, px.b, px.a)
+            if self._lookup[hash_index] == px:
+                # Pixel already in index
+                self.packed_bytes += self.pack_index(hash_index)
+                prev_px = px
+                continue
+
+            # Not recently seen, add to index
+            self._lookup[hash_index] = copy(px)
+
+            dr = wrap_around(px.r - prev_px.r)
+            dg = wrap_around(px.g - prev_px.g)
+            db = wrap_around(px.b - prev_px.b)
+
+            # If we are close enough to use QOI_OP_DIFF, do so
+            if all(-2 <= d <= 1 for d in (dr, dg, db)):
+                self.packed_bytes += self.pack_diff(prev_px, px)
+                prev_px = px
+                continue
+
+            # Check if possible to use QOI_OP_LUMA
+            if -32 <= dg <= 31:
+                dr_dg = wrap_around(dr - dg)
+                db_dg = wrap_around(db - dg)
+                if all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
+                    self.packed_bytes += self.pack_luma(prev_px, px)
+                    prev_px = px
+                    continue
+
+            # No reduced-byte packing mechanisms have succeeded. Pack full bytes.
+            if self.has_alpha:
+                self.packed_bytes += self.pack_rgba(px)
+            else:
+                self.packed_bytes += self.pack_rgb(px)
+
+    def _close_stream(self):
+        """Finalize packed bytes with byte stream close indicator
+
+        As per specification, "The byte stream's end is marked with 7 0x00 bytes
+        followed by a single 0x01 byte"
+
+        """
+        self.packed_bytes += b"\x00" * 7 + b"\x01"
 
     def __repr__(self):
         resolution = f"{self.width}x{self.height}"
@@ -109,7 +187,7 @@ class QoiEncoder:
         same index. QOI_OP_RUN should be used instead.
 
         """
-        if not 0 < index < 63:
+        if not 0 <= index <= 63:
             raise ValueError("QOI_OP_INDEX allowed range is [0, 63]")
         return bytes([index])
 
@@ -227,7 +305,7 @@ class QoiEncoder:
         QOI_OP_RGBA tags.
 
         """
-        if not 1 < count < 62:
+        if not 1 <= count <= 62:
             raise ValueError("QOI_OP_RUN allowed range is [1, 62]")
 
         out_byte_as_int = 0  # 0x00
