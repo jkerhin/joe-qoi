@@ -156,20 +156,83 @@ class QoiEncoder:
     def pack_luma(prev_px: RgbaPixel, this_px: RgbaPixel) -> bytes:
         """Store RGB deltas between two closely spaced pixels, and QOI_OP_LUMA tag
 
-        Allows for a wider
-        """
-        dr = this_px.r - prev_px.r
-        dg = this_px.g - prev_px.g
-        db = this_px.b - prev_px.b
+        Allows for a large pixel differnece than QOI_OP_DIFF, at the cost of an
+        additional byte.
 
-        if not all(-2 <= d <= 1 for d in (dr, dg, db)):
-            raise ValueError("QOI_OP_DIFF all deltas must be in range [-2, 1]")
+        .- QOI_OP_LUMA -------------------------------------.
+        |         Byte[0]         |         Byte[1]         |
+        |  7  6  5  4  3  2  1  0 |  7  6  5  4  3  2  1  0 |
+        |-------+-----------------+-------------+-----------|
+        |  1  0 |  green diff     |   dr - dg   |  db - dg  |
+        `---------------------------------------------------`
+        2-bit tag b10
+        6-bit green channel difference from the previous pixel -32..31
+        4-bit   red channel difference minus green channel difference -8..7
+        4-bit  blue channel difference minus green channel difference -8..7
+
+        The green channel is used to indicate the general direction of change and is
+        encoded in 6 bits. The red and blue channels (dr and db) base their diffs off
+        of the green channel difference and are encoded in 4 bits. I.e.:
+            dr_dg = (cur_px.r - prev_px.r) - (cur_px.g - prev_px.g)
+            db_dg = (cur_px.b - prev_px.b) - (cur_px.g - prev_px.g)
+
+        The difference to the current channel values are using a wraparound operation,
+        so "10 - 13" will result in 253, while "250 + 7" will result in 1.
+
+        Values are stored as unsigned integers with a bias of 32 for the green channel
+        and a bias of 8 for the red and blue channel.
+
+        The alpha value remains unchanged from the previous pixel.
+
+        """
+        dr = wrap_around(this_px.r - prev_px.r)
+        dg = wrap_around(this_px.g - prev_px.g)
+        db = wrap_around(this_px.b - prev_px.b)
+
+        if not -32 <= dg <= 31:
+            raise ValueError("QOI_OP_LUMA green delta must be in range [-32, 31]")
+
+        dr_dg = wrap_around(dr - dg)
+        db_dg = wrap_around(db - dg)
+
+        if not all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
+            raise ValueError(
+                "QOI_OP_LUMA red, blue offsets from green must be in range [-8, 7]"
+            )
+
+        out_byte_1_as_int = 0  # 0x00
+        out_byte_1_as_int |= QOI_OP_LUMA
+        out_byte_1_as_int |= dg + 32
+
+        out_byte_2_as_int = (dr_dg + 8) << 4
+        out_byte_2_as_int |= db_dg + 8
+
+        return bytes([out_byte_1_as_int, out_byte_2_as_int])
+
+    @staticmethod
+    def pack_run(count: int) -> bytes:
+        """Indicate that the preceding pixel should be repeated 'count' times
+
+        .- QOI_OP_RUN ------------.
+        |         Byte[0]         |
+        |  7  6  5  4  3  2  1  0 |
+        |-------+-----------------|
+        |  1  1 |       run       |
+        `-------------------------`
+        2-bit tag b11
+        6-bit run-length repeating the previous pixel: 1..62
+
+        The run-length is stored with a bias of -1. Note that the run-lengths 63 and 64
+        (b111110 and b111111) are illegal as they are occupied by the QOI_OP_RGB and
+        QOI_OP_RGBA tags.
+
+        """
+        if not 1 < count < 62:
+            raise ValueError("QOI_OP_RUN allowed range is [1, 62]")
 
         out_byte_as_int = 0  # 0x00
-        out_byte_as_int |= QOI_OP_DIFF
-        out_byte_as_int |= (dr + 2) << 4
-        out_byte_as_int |= (dg + 2) << 2
-        out_byte_as_int |= db + 2
+        out_byte_as_int |= QOI_OP_RUN
+        out_byte_as_int |= count - 1
 
         return bytes([out_byte_as_int])
 
