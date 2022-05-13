@@ -2,8 +2,9 @@
 import logging
 import struct
 from copy import copy
-from dataclasses import dataclass
 from typing import Iterable, List, Tuple, Union
+
+from .types import RgbaPixel
 
 log = logging.getLogger(__name__)
 # fmt: off
@@ -17,28 +18,14 @@ QOI_MASK_2   = int("C0", 16)  # b11xxxxxxxx
 # fmt: on
 
 
-@dataclass
-class RgbaPixel:
-    r: int = 0
-    g: int = 0
-    b: int = 0
-    a: int = 0
-
-    @property
-    def packed_rgb(self) -> bytes:
-        return struct.pack(">BBB", self.r, self.g, self.b)
-
-    @property
-    def packed_rgba(self) -> bytes:
-        return struct.pack(">BBBB", self.r, self.g, self.b, self.a)
-
-
 def qoi_color_hash(r: int, g: int, b: int, a: int) -> int:
     """Hashing function used to populate and index into the 64-pixel lookup table"""
     return (r * 3 + g * 5 + b * 7 + a * 11) % 64
 
 
 # TODO: Find a better place for this...
+#   Consider moving to types.py and subclassing int()
+#   i.e. SignedChar() The inheritance is hurting my brain tonight
 def wrap_around(val: int) -> int:
     """Implement 'signed character' wraparound logic"""
     if val > 127:
@@ -99,17 +86,26 @@ class QoiEncoder:
                 run_len += 1
                 if run_len == 62 or ix_px == n_pixels:
                     # Max run length
+                    log.debug(
+                        f"Encoding QOI_OP_RUN with len {run_len} at {len(self.packed_bytes)}"
+                    )
                     self.packed_bytes += self.pack_run(run_len)
                     run_len = 0
                 continue
             if run_len:
                 # Previously was in a run, have concluded
+                log.debug(
+                    f"Encoding QOI_OP_RUN with len {run_len} at {len(self.packed_bytes)}"
+                )
                 self.packed_bytes += self.pack_run(run_len)
                 run_len = 0
 
             hash_index = qoi_color_hash(px.r, px.g, px.b, px.a)
             if self._lookup[hash_index] == px:
                 # Pixel already in index
+                log.debug(
+                    f"Encoding QOI_OP_INDEX with ix {hash_index} at {len(self.packed_bytes)}"
+                )
                 self.packed_bytes += self.pack_index(hash_index)
                 prev_px = px
                 continue
@@ -117,12 +113,14 @@ class QoiEncoder:
             # Not recently seen, add to index
             self._lookup[hash_index] = copy(px)
 
+            # TODO: SignedChar() goes here
             dr = wrap_around(px.r - prev_px.r)
             dg = wrap_around(px.g - prev_px.g)
             db = wrap_around(px.b - prev_px.b)
 
             # If we are close enough to use QOI_OP_DIFF, do so
             if all(-2 <= d <= 1 for d in (dr, dg, db)):
+                log.debug(f"Encoding QOI_OP_DIFF with at {len(self.packed_bytes)}")
                 self.packed_bytes += self.pack_diff(prev_px, px)
                 prev_px = px
                 continue
@@ -132,14 +130,17 @@ class QoiEncoder:
                 dr_dg = wrap_around(dr - dg)
                 db_dg = wrap_around(db - dg)
                 if all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
+                    log.debug(f"Encoding QOI_OP_LUMA with at {len(self.packed_bytes)}")
                     self.packed_bytes += self.pack_luma(prev_px, px)
                     prev_px = px
                     continue
 
             # No reduced-byte packing mechanisms have succeeded. Pack full bytes.
             if self.has_alpha:
+                log.debug(f"Encoding QOI_OP_RGBA {px} with at {len(self.packed_bytes)}")
                 self.packed_bytes += self.pack_rgba(px)
             else:
+                log.debug(f"Encoding QOI_OP_RGB {px} with at {len(self.packed_bytes)}")
                 self.packed_bytes += self.pack_rgb(px)
 
     def _close_stream(self):

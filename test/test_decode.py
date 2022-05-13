@@ -20,6 +20,7 @@ def test_decode_header_bad():
     assert str(e.value) == "Magic bytes incorrect"
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "base_name",
     [
