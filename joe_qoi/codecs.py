@@ -145,11 +145,13 @@ class QoiEncoder:
                     prev_px = px
                     continue
 
-            # No reduced-byte packing mechanisms have succeeded. Pack full bytes.
-            if self.has_alpha:
+            if self.has_alpha and (px.a != prev_px.a):
                 log.debug(f"Encoding QOI_OP_RGBA {px} with at {len(self.packed_bytes)}")
                 self.packed_bytes += self.pack_rgba(px)
             else:
+                # The alpha channel for all RGB images will be identical. Additionally,
+                # RGBA images with significantly different RGB channels but identical
+                # alpha channels may use QOI_OP_RGB
                 log.debug(f"Encoding QOI_OP_RGB {px} with at {len(self.packed_bytes)}")
                 self.packed_bytes += self.pack_rgb(px)
             prev_px = px
