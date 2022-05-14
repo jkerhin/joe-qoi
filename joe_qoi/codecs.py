@@ -4,7 +4,7 @@ import struct
 from copy import copy
 from typing import Iterable, List, Tuple, Union
 
-from .types import RgbaPixel
+from .types import RgbaPixel, SignedChar
 
 log = logging.getLogger(__name__)
 # fmt: off
@@ -21,18 +21,6 @@ QOI_MASK_2   = int("C0", 16)  # b11xxxxxxxx
 def qoi_color_hash(r: int, g: int, b: int, a: int) -> int:
     """Hashing function used to populate and index into the 64-pixel lookup table"""
     return (r * 3 + g * 5 + b * 7 + a * 11) % 64
-
-
-# TODO: Find a better place for this...
-#   Consider moving to types.py and subclassing int()
-#   i.e. SignedChar() The inheritance is hurting my brain tonight
-def wrap_around(val: int) -> int:
-    """Implement 'signed character' wraparound logic"""
-    if val > 127:
-        return val - 256
-    elif val < -128:
-        return val + 256
-    return val
 
 
 class QoiEncoder:
@@ -123,10 +111,9 @@ class QoiEncoder:
                     prev_px = px
                     continue
 
-            # TODO: SignedChar() goes here
-            dr = wrap_around(px.r - prev_px.r)
-            dg = wrap_around(px.g - prev_px.g)
-            db = wrap_around(px.b - prev_px.b)
+            dr = SignedChar(px.r - prev_px.r)
+            dg = SignedChar(px.g - prev_px.g)
+            db = SignedChar(px.b - prev_px.b)
 
             # If we are close enough to use QOI_OP_DIFF, do so
             if all(-2 <= d <= 1 for d in (dr, dg, db)):
@@ -137,8 +124,8 @@ class QoiEncoder:
 
             # Check if possible to use QOI_OP_LUMA
             if -32 <= dg <= 31:
-                dr_dg = wrap_around(dr - dg)
-                db_dg = wrap_around(db - dg)
+                dr_dg = dr - dg
+                db_dg = db - dg
                 if all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
                     log.debug(f"Encoding QOI_OP_LUMA with at {len(self.packed_bytes)}")
                     self.packed_bytes += self.pack_luma(prev_px, px)
@@ -233,9 +220,9 @@ class QoiEncoder:
         The alpha value remains unchanged from the previous pixel.
 
         """
-        dr = wrap_around(this_px.r - prev_px.r)
-        dg = wrap_around(this_px.g - prev_px.g)
-        db = wrap_around(this_px.b - prev_px.b)
+        dr = SignedChar(this_px.r - prev_px.r)
+        dg = SignedChar(this_px.g - prev_px.g)
+        db = SignedChar(this_px.b - prev_px.b)
 
         if not all(-2 <= d <= 1 for d in (dr, dg, db)):
             raise ValueError("QOI_OP_DIFF all deltas must be in range [-2, 1]")
@@ -281,15 +268,15 @@ class QoiEncoder:
         The alpha value remains unchanged from the previous pixel.
 
         """
-        dr = wrap_around(this_px.r - prev_px.r)
-        dg = wrap_around(this_px.g - prev_px.g)
-        db = wrap_around(this_px.b - prev_px.b)
+        dr = SignedChar(this_px.r - prev_px.r)
+        dg = SignedChar(this_px.g - prev_px.g)
+        db = SignedChar(this_px.b - prev_px.b)
 
         if not -32 <= dg <= 31:
             raise ValueError("QOI_OP_LUMA green delta must be in range [-32, 31]")
 
-        dr_dg = wrap_around(dr - dg)
-        db_dg = wrap_around(db - dg)
+        dr_dg = dr - dg
+        db_dg = db - dg
 
         if not all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
             raise ValueError(
