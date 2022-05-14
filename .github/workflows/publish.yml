@@ -36,6 +36,7 @@ jobs:
         pytest
   deploy:
     runs-on: ubuntu-latest
+    environment: publish
     needs: [test]
     steps:
     - uses: actions/checkout@v2
