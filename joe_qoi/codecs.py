@@ -84,8 +84,8 @@ class QoiEncoder:
             if px == prev_px:
                 # Run continues
                 run_len += 1
-                if run_len == 62 or ix_px == n_pixels:
-                    # Max run length
+                if run_len == 62 or ix_px == (n_pixels - 1):
+                    # Max run length or end of input stream
                     log.debug(
                         f"Encoding QOI_OP_RUN with len {run_len} at {len(self.packed_bytes)}"
                     )
@@ -112,6 +112,16 @@ class QoiEncoder:
 
             # Not recently seen, add to index
             self._lookup[hash_index] = copy(px)
+
+            if self.has_alpha:
+                # Can't use QOI_OP_DIFF or QOI_OP_LUMA if alpha channel differs
+                if px.a != prev_px.a:
+                    log.debug(
+                        f"Encoding QOI_OP_RGBA {px} with at {len(self.packed_bytes)}"
+                    )
+                    self.packed_bytes += self.pack_rgba(px)
+                    prev_px = px
+                    continue
 
             # TODO: SignedChar() goes here
             dr = wrap_around(px.r - prev_px.r)
@@ -142,6 +152,7 @@ class QoiEncoder:
             else:
                 log.debug(f"Encoding QOI_OP_RGB {px} with at {len(self.packed_bytes)}")
                 self.packed_bytes += self.pack_rgb(px)
+            prev_px = px
 
     def _close_stream(self):
         """Finalize packed bytes with byte stream close indicator
@@ -151,6 +162,10 @@ class QoiEncoder:
 
         """
         self.packed_bytes += b"\x00" * 7 + b"\x01"
+
+    def __bytes__(self) -> bytes:
+        """Return encoded QOI bytestream when calling bytes() on a QoiEncoder"""
+        return bytes(self.packed_bytes)
 
     def __repr__(self):
         resolution = f"{self.width}x{self.height}"
@@ -430,6 +445,7 @@ class QoiDecoder:
                 px.g = g
                 px.b = b
                 self._ix += 3
+                log.debug("%s", px)
 
             elif this_byte == QOI_OP_RGBA:
                 # Full RGBA pixel values
@@ -440,6 +456,7 @@ class QoiDecoder:
                 px.b = b
                 px.a = a
                 self._ix += 4
+                log.debug("%s", px)
 
             # Now on to the four two-bit tags
             elif (this_byte & QOI_MASK_2) == QOI_OP_INDEX:

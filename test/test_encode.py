@@ -1,4 +1,5 @@
 import pytest
+from PIL import Image
 
 from joe_qoi.codecs import QoiEncoder, RgbaPixel
 
@@ -111,3 +112,32 @@ def test_pack_run_out_of_range(count):
     with pytest.raises(ValueError) as e:
         _ = QoiEncoder.pack_run(count)
     assert str(e.value) == "QOI_OP_RUN allowed range is [1, 62]"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "base_name",
+    [
+        "dice",
+        "kodim10",
+        "kodim23",
+        "qoi_logo",
+        "testcard",
+        "testcard_rgba",
+        "wikipedia_008",
+    ],
+)
+def test_decode_against_png(test_image_root, base_name):
+    png_pth = test_image_root / f"{base_name}.png"
+    qoi_pth = test_image_root / f"{base_name}.qoi"
+    qoi_bytes = qoi_pth.read_bytes()
+
+    im = Image.open(png_pth)
+    qe = QoiEncoder.from_bytes(
+        im.tobytes(),
+        width=im.width,
+        height=im.height,
+        has_alpha="A" in im.mode,  # RGB / RGBA
+        all_linear=False,  # False in all test images
+    )
+    assert bytes(qe) == qoi_bytes
