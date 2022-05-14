@@ -1,7 +1,7 @@
 # joe-qoi
 
 <!-- TODO [![pypi](https://img.shields.io/pypi/v/joe-qoi.svg)](https://pypi.org/project/joe-qoi/) -->
-<!-- TODO [![Changelog](https://img.shields.io/github/v/release/jkerhin/joe-qoi?include_prereleases&label=changelog)](https://github.com/jkerhin/joe-qoi/releases) -->
+[![Changelog](https://img.shields.io/github/v/release/jkerhin/joe-qoi?include_prereleases&label=changelog)](https://github.com/jkerhin/joe-qoi/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/jkerhin/joe-qoi/blob/main/LICENSE)
 
 Pure Python implementation of QOI image format
@@ -31,7 +31,25 @@ other hand, is _not_ optimized for these kind of operations. As a result, this l
 is _vastly_ less perforamant than the `c` reference code. E.g. decoding `dice.qoi` takes
 3 **seconds** on my machine (over 45 seconds with DEBUG logging enabled).
 
-TODO: Usage instructions go here.
+The two classes of interest are the `QoiDecoder` class, which reads a QOI byte stream
+and populates a list of `RgbaPixel`s, and `QoiEncoder` which takes image metadata and a
+list of `RgbaPixel`s, and generates a QOI byte stream.
+
+### Benchmarks
+
+On an Intel i7-3770K, running Python 3.8.10 on Ubuntu 20.04 inside of WSL
+
+```
+$ python benchmark.py
+        decode ms   encode ms   decode mpps   encode mpps   size kb    rate
+joe-qoi:   3227.2      1802.5           0.1           0.3       507   27.1%     dice
+joe-qoi:   5896.9      7262.7           0.1           0.1       637   55.3%     kodim10
+joe-qoi:   5346.7      7604.7           0.1           0.1       659   57.2%     kodim23
+joe-qoi:    415.7       108.6           0.2           0.9        16    4.2%     qoi_logo
+joe-qoi:    369.4       178.8           0.2           0.4        21    8.3%     testcard
+joe-qoi:    337.4       207.8           0.2           0.3        23    9.2%     testcard_rgba
+joe-qoi:  13943.6     16543.5           0.1           0.1      1485   51.3%     wikipedia_008
+```
 
 ## Development
 
