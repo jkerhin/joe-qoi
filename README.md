@@ -29,7 +29,7 @@ differ.
 The QOI format is _heavily_ optimized for low-level bitwise operations. Python, on the
 other hand, is _not_ optimized for these kind of operations. As a result, this library
 is _vastly_ less perforamant than the `c` reference code. E.g. decoding `dice.qoi` takes
-3 **seconds** on my machine (over 45 seconds with DEBUG logging enabled). 
+3 **seconds** on my machine (over 45 seconds with DEBUG logging enabled).
 
 TODO: Usage instructions go here.
 
