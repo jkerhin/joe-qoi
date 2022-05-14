@@ -2,7 +2,7 @@ from pathlib import Path
 
 from setuptools import setup
 
-VERSION = "0.0.1"
+version = Path("./joe_qoi/version.py").read_text().split("=")[1].replace('"', "")
 
 
 setup(
@@ -18,7 +18,7 @@ setup(
         "Changelog": "https://github.com/jkerhin/joe-qoi/releases",
     },
     license="MIT",
-    version=VERSION,
+    version=version,
     packages=["joe_qoi"],
     install_requires=[],
     extras_require={"test": ["pytest"]},
