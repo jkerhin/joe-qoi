@@ -21,6 +21,6 @@ setup(
     version=version,
     packages=["joe_qoi"],
     install_requires=[],
-    extras_require={"test": ["pytest"]},
+    extras_require={"test": ["pillow", "pytest"]},
     python_requires=">=3.7",
 )

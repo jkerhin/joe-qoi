@@ -2,8 +2,9 @@
 import logging
 import struct
 from copy import copy
-from dataclasses import dataclass
 from typing import Iterable, List, Tuple, Union
+
+from .types import RgbaPixel, SignedChar
 
 log = logging.getLogger(__name__)
 # fmt: off
@@ -15,22 +16,6 @@ QOI_OP_RGB   = int("FE", 16)  # b1111111110
 QOI_OP_RGBA  = int("FF", 16)  # b1111111111
 QOI_MASK_2   = int("C0", 16)  # b11xxxxxxxx
 # fmt: on
-
-
-@dataclass
-class RgbaPixel:
-    r: int = 0
-    g: int = 0
-    b: int = 0
-    a: int = 0
-
-    @property
-    def packed_rgb(self) -> bytes:
-        return struct.pack(">BBB", self.r, self.g, self.b)
-
-    @property
-    def packed_rgba(self) -> bytes:
-        return struct.pack(">BBBB", self.r, self.g, self.b, self.a)
 
 
 def qoi_color_hash(r: int, g: int, b: int, a: int) -> int:
@@ -53,6 +38,124 @@ class QoiEncoder:
         self.has_alpha = has_alpha
         self.all_linear = all_linear
 
+        # This is called 'index' in the reference code, but that would easy to confuse
+        # with the '_ix' variable that tracks position
+        self._lookup = [RgbaPixel() for _ in range(64)]
+        self.packed_bytes: bytearray = bytearray()
+
+        # First, pack the header
+        self.packed_bytes += self.encode_header(width, height, has_alpha, all_linear)
+
+        # Then iterate through the pixels, packing into '.packed_bytes' as we go
+        self._encode()
+
+        # Finally, write the stream close bytes
+        self._close_stream()
+
+    def _encode(self):
+        """Pack pixels into QOI format
+
+        Operates in a streaming manner with limited history. Prefers low-byte storage
+        mechanisms (QOI_OP_RUN, QOI_OP_INDEX) over multi-byte storage. Exit early when
+        operation is identified to avoid doing unnecessary math
+
+        """
+
+        # Encoder/decoder initial condition, as per speficication
+        prev_px = RgbaPixel(r=0, g=0, b=0, a=255)
+
+        run_len = 0
+        n_pixels = len(self.rgba_pixels)
+        for ix_px, px in enumerate(self.rgba_pixels):
+
+            # Handle runs of identical pixels
+            if px == prev_px:
+                # Run continues
+                run_len += 1
+                if run_len == 62 or ix_px == (n_pixels - 1):
+                    # Max run length or end of input stream
+                    log.debug(
+                        f"Encoding QOI_OP_RUN with len {run_len} at {len(self.packed_bytes)}"
+                    )
+                    self.packed_bytes += self.pack_run(run_len)
+                    run_len = 0
+                continue
+            if run_len:
+                # Previously was in a run, have concluded
+                log.debug(
+                    f"Encoding QOI_OP_RUN with len {run_len} at {len(self.packed_bytes)}"
+                )
+                self.packed_bytes += self.pack_run(run_len)
+                run_len = 0
+
+            hash_index = qoi_color_hash(px.r, px.g, px.b, px.a)
+            if self._lookup[hash_index] == px:
+                # Pixel already in index
+                log.debug(
+                    f"Encoding QOI_OP_INDEX with ix {hash_index} at {len(self.packed_bytes)}"
+                )
+                self.packed_bytes += self.pack_index(hash_index)
+                prev_px = px
+                continue
+
+            # Not recently seen, add to index
+            self._lookup[hash_index] = copy(px)
+
+            if self.has_alpha:
+                # Can't use QOI_OP_DIFF or QOI_OP_LUMA if alpha channel differs
+                if px.a != prev_px.a:
+                    log.debug(
+                        f"Encoding QOI_OP_RGBA {px} with at {len(self.packed_bytes)}"
+                    )
+                    self.packed_bytes += self.pack_rgba(px)
+                    prev_px = px
+                    continue
+
+            dr = SignedChar(px.r - prev_px.r)
+            dg = SignedChar(px.g - prev_px.g)
+            db = SignedChar(px.b - prev_px.b)
+
+            # If we are close enough to use QOI_OP_DIFF, do so
+            if all(-2 <= d <= 1 for d in (dr, dg, db)):
+                log.debug(f"Encoding QOI_OP_DIFF with at {len(self.packed_bytes)}")
+                self.packed_bytes += self.pack_diff(prev_px, px)
+                prev_px = px
+                continue
+
+            # Check if possible to use QOI_OP_LUMA
+            if -32 <= dg <= 31:
+                dr_dg = dr - dg
+                db_dg = db - dg
+                if all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
+                    log.debug(f"Encoding QOI_OP_LUMA with at {len(self.packed_bytes)}")
+                    self.packed_bytes += self.pack_luma(prev_px, px)
+                    prev_px = px
+                    continue
+
+            if self.has_alpha and (px.a != prev_px.a):
+                log.debug(f"Encoding QOI_OP_RGBA {px} with at {len(self.packed_bytes)}")
+                self.packed_bytes += self.pack_rgba(px)
+            else:
+                # The alpha channel for all RGB images will be identical. Additionally,
+                # RGBA images with significantly different RGB channels but identical
+                # alpha channels may use QOI_OP_RGB
+                log.debug(f"Encoding QOI_OP_RGB {px} with at {len(self.packed_bytes)}")
+                self.packed_bytes += self.pack_rgb(px)
+            prev_px = px
+
+    def _close_stream(self):
+        """Finalize packed bytes with byte stream close indicator
+
+        As per specification, "The byte stream's end is marked with 7 0x00 bytes
+        followed by a single 0x01 byte"
+
+        """
+        self.packed_bytes += b"\x00" * 7 + b"\x01"
+
+    def __bytes__(self) -> bytes:
+        """Return encoded QOI bytestream when calling bytes() on a QoiEncoder"""
+        return bytes(self.packed_bytes)
+
     def __repr__(self):
         resolution = f"{self.width}x{self.height}"
         channel_str = "RGBA" if self.has_alpha else "RGB"
@@ -61,6 +164,160 @@ class QoiEncoder:
         )
         n_bytes = len(self.rgba_pixels) * (4 if self.has_alpha else 3)
         return f"{resolution} {channel_str}, {colorspace_str}, {n_bytes} bytes to pack"
+
+    @staticmethod
+    def pack_rgb(px: RgbaPixel) -> bytes:
+        """Pack RGB pixel with QOI_OP_RGB tag and r, g, b pixel values"""
+        return bytes((QOI_OP_RGB, px.r, px.g, px.b))
+
+    @staticmethod
+    def pack_rgba(px: RgbaPixel) -> bytes:
+        """Pack RGBA pixel with QOI_OP_RGB tag and r, g, b, a pixel values"""
+        return bytes((QOI_OP_RGBA, px.r, px.g, px.b, px.a))
+
+    @staticmethod
+    def pack_index(index: int) -> bytes:
+        """Index into the "recently seen pixels" lookup table
+
+        .- QOI_OP_INDEX ----------.
+        |         Byte[0]         |
+        |  7  6  5  4  3  2  1  0 |
+        |-------+-----------------|
+        |  0  0 |     index       |
+        `-------------------------`
+        2-bit tag b00
+        6-bit index into the color index array: 0..63
+
+        A valid encoder must not issue 2 or more consecutive QOI_OP_INDEX chunks to the
+        same index. QOI_OP_RUN should be used instead.
+
+        """
+        if not 0 <= index <= 63:
+            raise ValueError("QOI_OP_INDEX allowed range is [0, 63]")
+        return bytes([index])
+
+    @staticmethod
+    def pack_diff(prev_px: RgbaPixel, this_px: RgbaPixel) -> bytes:
+        """Store RGB deltas between two very closely spaced pixels, and QOI_OP_DIFF tag
+
+        .- QOI_OP_DIFF -----------.
+        |         Byte[0]         |
+        |  7  6  5  4  3  2  1  0 |
+        |-------+-----+-----+-----|
+        |  0  1 |  dr |  dg |  db |
+        `-------------------------`
+        2-bit tag b01
+        2-bit   red channel difference from the previous pixel between -2..1
+        2-bit green channel difference from the previous pixel between -2..1
+        2-bit  blue channel difference from the previous pixel between -2..1
+
+        The difference to the current channel values are using a wraparound operation,
+        so "1 - 2" will result in 255, while "255 + 1" will result in 0.
+
+        Values are stored as unsigned integers with a bias of 2. E.g. -2 is stored as
+        0 (b00). 1 is stored as 3 (b11).
+
+        The alpha value remains unchanged from the previous pixel.
+
+        """
+        dr = SignedChar(this_px.r - prev_px.r)
+        dg = SignedChar(this_px.g - prev_px.g)
+        db = SignedChar(this_px.b - prev_px.b)
+
+        if not all(-2 <= d <= 1 for d in (dr, dg, db)):
+            raise ValueError("QOI_OP_DIFF all deltas must be in range [-2, 1]")
+
+        out_byte_as_int = 0  # 0x00
+        out_byte_as_int |= QOI_OP_DIFF
+        out_byte_as_int |= (dr + 2) << 4
+        out_byte_as_int |= (dg + 2) << 2
+        out_byte_as_int |= db + 2
+
+        return bytes([out_byte_as_int])
+
+    @staticmethod
+    def pack_luma(prev_px: RgbaPixel, this_px: RgbaPixel) -> bytes:
+        """Store RGB deltas between two closely spaced pixels, and QOI_OP_LUMA tag
+
+        Allows for a large pixel differnece than QOI_OP_DIFF, at the cost of an
+        additional byte.
+
+        .- QOI_OP_LUMA -------------------------------------.
+        |         Byte[0]         |         Byte[1]         |
+        |  7  6  5  4  3  2  1  0 |  7  6  5  4  3  2  1  0 |
+        |-------+-----------------+-------------+-----------|
+        |  1  0 |  green diff     |   dr - dg   |  db - dg  |
+        `---------------------------------------------------`
+        2-bit tag b10
+        6-bit green channel difference from the previous pixel -32..31
+        4-bit   red channel difference minus green channel difference -8..7
+        4-bit  blue channel difference minus green channel difference -8..7
+
+        The green channel is used to indicate the general direction of change and is
+        encoded in 6 bits. The red and blue channels (dr and db) base their diffs off
+        of the green channel difference and are encoded in 4 bits. I.e.:
+            dr_dg = (cur_px.r - prev_px.r) - (cur_px.g - prev_px.g)
+            db_dg = (cur_px.b - prev_px.b) - (cur_px.g - prev_px.g)
+
+        The difference to the current channel values are using a wraparound operation,
+        so "10 - 13" will result in 253, while "250 + 7" will result in 1.
+
+        Values are stored as unsigned integers with a bias of 32 for the green channel
+        and a bias of 8 for the red and blue channel.
+
+        The alpha value remains unchanged from the previous pixel.
+
+        """
+        dr = SignedChar(this_px.r - prev_px.r)
+        dg = SignedChar(this_px.g - prev_px.g)
+        db = SignedChar(this_px.b - prev_px.b)
+
+        if not -32 <= dg <= 31:
+            raise ValueError("QOI_OP_LUMA green delta must be in range [-32, 31]")
+
+        dr_dg = dr - dg
+        db_dg = db - dg
+
+        if not all(-8 <= d <= 7 for d in (dr_dg, db_dg)):
+            raise ValueError(
+                "QOI_OP_LUMA red, blue offsets from green must be in range [-8, 7]"
+            )
+
+        out_byte_1_as_int = 0  # 0x00
+        out_byte_1_as_int |= QOI_OP_LUMA
+        out_byte_1_as_int |= dg + 32
+
+        out_byte_2_as_int = (dr_dg + 8) << 4
+        out_byte_2_as_int |= db_dg + 8
+
+        return bytes([out_byte_1_as_int, out_byte_2_as_int])
+
+    @staticmethod
+    def pack_run(count: int) -> bytes:
+        """Indicate that the preceding pixel should be repeated 'count' times
+
+        .- QOI_OP_RUN ------------.
+        |         Byte[0]         |
+        |  7  6  5  4  3  2  1  0 |
+        |-------+-----------------|
+        |  1  1 |       run       |
+        `-------------------------`
+        2-bit tag b11
+        6-bit run-length repeating the previous pixel: 1..62
+
+        The run-length is stored with a bias of -1. Note that the run-lengths 63 and 64
+        (b111110 and b111111) are illegal as they are occupied by the QOI_OP_RGB and
+        QOI_OP_RGBA tags.
+
+        """
+        if not 1 <= count <= 62:
+            raise ValueError("QOI_OP_RUN allowed range is [1, 62]")
+
+        out_byte_as_int = 0  # 0x00
+        out_byte_as_int |= QOI_OP_RUN
+        out_byte_as_int |= count - 1
+
+        return bytes([out_byte_as_int])
 
     @staticmethod
     def encode_header(
@@ -177,6 +434,7 @@ class QoiDecoder:
                 px.g = g
                 px.b = b
                 self._ix += 3
+                log.debug("%s", px)
 
             elif this_byte == QOI_OP_RGBA:
                 # Full RGBA pixel values
@@ -187,6 +445,7 @@ class QoiDecoder:
                 px.b = b
                 px.a = a
                 self._ix += 4
+                log.debug("%s", px)
 
             # Now on to the four two-bit tags
             elif (this_byte & QOI_MASK_2) == QOI_OP_INDEX:
